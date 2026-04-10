@@ -71,16 +71,3 @@ ssh user@raspberrypi
 ## Optional — Pi-hole as DNS over Tailscale
 
 Install Pi-hole on RPi, then in Tailscale admin panel set your RPi's Tailscale IP as the global DNS server. All devices on your tailnet get ad blocking automatically.
-
-> **Keywords to look up:** Tailscale MagicDNS, Tailscale exit node, Tailscale ACLs
-
----
-
-## Checklist
-
-- [ ] Tailscale account created
-- [ ] Tailscale installed on RPi
-- [ ] Subnet route `192.168.1.0/24` approved in admin panel
-- [ ] IP forwarding enabled on RPi
-- [ ] Tailscale app installed on client devices
-- [ ] Test: `ping 192.168.1.1` from outside home network

@@ -1,8 +1,6 @@
-# Option 3 — use Router as VPN server (Production Setup)
+# Home VPN Gateway (Mercusys version)
 
----
-
-## How It Works
+## How I set it up 
 
 ```
 [Phone / Laptop - anywhere]
@@ -19,8 +17,9 @@
    - DHCP server
           │
   [Home LAN]
-   -  RPi4.home 
+   - rpi.home 
    - mypc.home
+   - other devices
    ...
 ```
 
@@ -35,7 +34,6 @@ RPi act as dns server that provide domain name to each device which has been bin
 
 - Mercysys MR60X 
 (Any router that has native Wireguard support)
-- Raspberry Pi 4 (DNS or Pi-hole, depends on user)
 - DuckDNS account — [duckdns.org](https://www.duckdns.org) (free)
 - WireGuard app on client devices
 
@@ -49,8 +47,8 @@ RPi act as dns server that provide domain name to each device which has been bin
 to make it passes the public IP directly to Mercusys, so our custom router owns the WAN.
 
 Two approaches
-- **Bridge mode** — full pass-through, preferred
-- **DMZ host** — forwards all unsolicited traffic to Mercusys, simpler to set up but it is not a direct solution. 
+- **Bridge mode**
+- **DMZ host (Not recommend)**: &nbsp; Forwards all unsolicited traffic to Mercusys, simpler but risk double NAT. 
 
 ### 2. MikroTik — Basic WAN Setup
 
@@ -74,16 +72,11 @@ it is very simple
 1. Config Tunnel address and specified port 51820 UDP, in this case we use 10.0.0.1/24
 2. Generate private and public key, don't forget to note
 ![image](/asset/wireguardMR60x.png)
-3. 
+3. Set allowed LAN IP to enter the tunnel
 ![image](/asset/wireguardMR60x1.png)
-
+4. Use QR Code or the Client config export to import to client Wireguard app
 ![image](/asset/exportClientKey.png)
 
-```
-in our case we will use
-```
-
-> **Keyword to look up:** MikroTik WireGuard setup RouterOS 7, MikroTik WireGuard peer config
 
 ### 5. Add Client Peer on client machine
 
@@ -92,7 +85,7 @@ Generate keypair on any Linux machine (or RPi):
 wg genkey | tee client.key | wg pubkey > client.pub
 ```
 
-In Winbox:
+In Window , we need to use Winbox:
 ```
 WireGuard → Peers → Add
   Interface: wg0
@@ -136,7 +129,17 @@ sudo reboot
 
 Add local DNS record by mapping the DHCP reserved ip to domain name
 ```
-abc
+interface=eth0
+interface=wg0
+# Example
+address=/mypc.home/192.168.1.120
+address=/laptop.home/192.168.1.110
+address=/esp32.home/192.168.1.115
+address=/rpi.home/192.168.1.253
+
+# Forward everything else to upstream DNS
+server=1.1.1.1		# Cloudflare DNS
+server=8.8.8.8		# Google DNS
 ```
 
 ---
@@ -146,23 +149,7 @@ abc
 - Open wireguard app
 - Connect WireGuard profile → inside home LAN
 - `ssh user@mypc.home` works
-- Pi-hole filters ads for all devices including VPN clients
-- MikroTik handles all routing — RPi only does DNS
 
 #### In case the client have no GUI
 - [Install Wireguard in Terminal & Quickstart](https://www.wireguard.com/quickstart/#key-generation)
 - Write a client config file by yourself, here's the standard way to write it: [Samples client.conf](https://gist.github.com/lanceliao/5d2977f417f34dda0e3d63ac7e217fd6)
-
----
-
-## Checklist
-
-- [ ] Your ONU router set in bridge mode — Mercusys MR60X gets public IP on WAN and becomes the main router
-- [ ] Register DuckDNS, and create Duckdns script to run automatically on RPi using cron
-- [ ] Create Mercusys WireGuard interface created ( port `51820`, ip subnet = up to you)
-- [ ] Make sure Firewall inbound rule doesn't block UDP 51820
-- [ ] Client 
-- [ ] Client config imported into WireGuard app
-- [ ] Pi-hole installed on RPi (DHCP off)
-- [ ] MikroTik DHCP points to RPi as DNS
-- [ ] Test: `ssh user@mypc.home` from outside network

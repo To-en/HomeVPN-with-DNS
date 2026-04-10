@@ -1,144 +1,123 @@
-# 🏠 Home VPN Gateway
+# Home VPN Gateway
 
-> Access any device on your home network — by name — from anywhere in the world. Free, self-hosted, no third-party mesh services.
+> How I setup my own VPN Server to access home network.<br>
+> The original need is for me to SSH from my university.
 
-Built on a **Raspberry Pi 4** running WireGuard + dnsmasq. Once connected, `ssh user@mypc.home` just works, whether you're across the street or across the world.
+Instead of using Tailscale I decided to built on a **Raspberry Pi 4 (Rpi)** <br>
+as WireGuard server & DNS server.<br> 
+Once connected, just `ssh user@mypc.home` from anywhere.
 
 ---
 
-## How It Works
+## How I set it up
 
 ```
-[Your phone / laptop — anywhere]
-			  	│
+[Your phone / laptop from anywhere]
+	            │
     WireGuard tunnel (UDP 51820)
-        	│
+        	    │
   [DuckDNS -> home public IP]
-        	│
+        	    │
   [Router: port forward 51820]
 		- DHCP (192.168.1.100 – 200)
-        	│
-  [Raspberry Pi 4 — 192.168.1.1]
-   - WireGuard server  (10.0.0.1) 
-   - dnsmasq DNS       (*Static Mapping)
-          │
+        │
 	[Home LAN]
-   - mypc.home
-   - rpi.home
+   - Other devices
+   - RasberryPi (Static IP  192.168.1.253) 
+      - WireGuard server  (10.0.0.1) 
+      - DNS server        (*Static Mapping)
 	 ...
 ```
 
-New devices on your LAN register their own `.home` name automatically — no manual DNS entries needed.
+### For someone with CGNAT Router
+CGNAT prevent the home router to have permanent public IP which Wireguard client needs.<br>
+But there are a good reason why it has to be that way [here](https://www.a10networks.com/glossary/what-is-carrier-grade-nat-cgn-cgnat/)<br>
 
-### For some one with CGNAT Router
-```
-[Your phone / laptop — anywhere]
-          │
-    WireGuard tunnel (ISP DDNS provided UDP Port)
-          │
-  [ISP DDNS provided domain name → home public IP]
-          │
-  [Router: port forward 5540 (Some port that ISP gives)]
-		- DHCP (192.168.1.100 – 200)
-        	│
-  [Raspberry Pi 4 — 192.168.1.1]
-   - WireGuard server  (10.0.0.1) 
-   - dnsmasq DNS       (*Static Mapping)
-          │
-	[Home LAN]
-   - mypc.home
-   - rpi.home
-	 ...
-```
-CGNAT prevent the home router to have static public ip, then we need to call ISP provider to enable their own DDNS service that will map the changing home public ip to their domain name  
-<br>
-In this case Duckdns is not required we will use the DDNS service that the ISP provided, in my case it is AIS Fibre THDDNS
-
----
-
-## Equipment
-
-| Item | Notes |
-|------|-------|
-| Raspberry Pi 4 | 2GB+ recommended |
-| Ethernet cable | RPi should be wired |
-| Home router | Needs port forwarding support |
-| DuckDNS account | Free at [duckdns.org](https://www.duckdns.org) |
-| WireGuard client | App for Android / iOS / Windows / Linux / macOS |
-
----
+To bypass CGNAT: 
+- Option A: &nbsp; Buy Static IP and use DuckDNS
+- Option B: &nbsp; If they offer free DDNS service
+  1. Call ISP to enable it
+  2. Receive Domain name and ports that should map directly to router ip  
+  3. Use that instead of DuckDNS <br>
+  
+  In my case the service is called `THDDNS`
+    ```
+        WireGuard tunnel (UDP 51820)
+              │
+      [AIS THDDNS -> home public IP]
+              │
+      [Router: port forward 5540]
+    ```
 
 ## Setup Guide
 
-### 1. Raspberry Pi — Static IP
-
-Edit `/etc/dhcpcd.conf` (use the file at `configs/system/dhcpcd.conf` as reference):
-
+### 1. Set RPi Static IP
+I set it as 192.168.253/24, you set what is needed for
 ```bash
-sudo nano /etc/dhcpcd.conf
-```
+sudo nmcli con mod "Wired connection 1" ipv4.address 192.168.1.253/24
 
-Reboot after saving:
-```bash
+sudo nmcli con mode "Wired connection 1" ipv4.gateway 192.168.1.1
+
+sudo nmcli con mode "Wired connection 1" ipv4.dns 127.0.0.1
+# Pi itself act as DNS so we fill loopback ip
+
 sudo reboot
 ```
 
----
+### 2. If home router IP has no domain name yet
 
-### 2. DuckDNS — Dynamic DNS
-
-1. Sign in at [duckdns.org](https://www.duckdns.org) and create a subdomain (e.g., `myhome.duckdns.org`)
-2. Copy your token from the dashboard
-3. Install the update script:
+1. Sign in at [duckdns.org](https://www.duckdns.org) 
+2. Create a subdomain (e.g., `myhome.duckdns.org`)
+3. Keep your token from the dashboard
+4. Add cron job script to keep IP updated:
 
 ```bash
-cp scripts/duckdns-update.sh ~/duckdns-update.sh
-chmod +x ~/duckdns-update.sh
-
-# Edit with your subdomain and token
-nano ~/duckdns-update.sh
-
-# Add to cron — runs every 5 minutes
 crontab -e
-# Add this line:
-# */5 * * * * ~/duckdns-update.sh
+# Add to cron — runs every 5 minutes
+*/5 * * * * curl -s "https://www.duckdns.org/update?domains=YOUR_SUBDOMAIN&token=YOUR_TOKEN&ip=" > ~/duckdns.log
 ```
 
 ---
 
-### 3. Router — Port Forwarding
+### 3. Router setting 
+#### Port Forwarding
 
 In your router admin panel, forward:
 
 | Protocol | External Port | Internal IP | Internal Port |
 |----------|--------------|-------------|---------------|
-| UDP | 51820 | 192.168.1.1 | 51820 |
+| UDP | 51820 | 192.168.1.253 | 51820 |
 
 In case of CGNAT Router
 
 | Protocol | External Port | Internal IP | Internal Port |
 |----------|--------------|-------------|---------------|
-| UDP | 5540 (ISP given port) | 192.168.1.1 | 51820 |
+| UDP | 5540 (ISP given port) | 192.168.1.253 | 51820 |
 
+#### DHCP Reservation
+Usually this setting is in -> Network -> LAN -> DHCP , there should be setting panel for DHCP reservation or binding
+- Set mypcEthernet -> 192.168.1.120
+- Set mylaptopWifi -> 192.168.1.111
+<br>....
 
 ---
 
-### 4. WireGuard — Server (RPi)
-
+### 4. WireGuard -- Server (RPi)
+Install and setup Wireguard
 ```bash
 sudo apt update && sudo apt install wireguard -y
+
+# add wireguard network interface first
+ip link add dev wg0 type wireguard
 
 # Generate server keypair
 wg genkey | sudo tee /etc/wireguard/server_private.key | wg pubkey | sudo tee /etc/wireguard/server_public.key
 
-# Copy server config
-sudo cp configs/wireguard/wg0.conf /etc/wireguard/wg0.conf
-
-# Fill in your server private key
+# Create config file of this name
 sudo nano /etc/wireguard/wg0.conf
 ```
 
-Write the following config
+Write the following in `wg0.conf`
 ```ini
 [Interface]
 PrivateKey = <contents of server.key>
@@ -146,14 +125,14 @@ Address = 10.0.0.1/24
 ListenPort = 51820
 PostUp   = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
 PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
-
 [Peer]
 # Add one block per client — see step 6
 PublicKey = <client_public_key>
 AllowedIPs = 10.0.0.2/32
 ```
-
+Automate wireguard process 
 ```bash
+# Start wireguard as systemd service
 sudo systemctl enable wg-quick@wg0
 sudo systemctl start wg-quick@wg0
 
@@ -164,24 +143,27 @@ sudo sysctl -p
 
 ---
 
-### 5. WireGuard — Client
+### 5. WireGuard -- Client
 
 Generate keypair for each client device:
-
 ```bash
 wg genkey | tee client.key | wg pubkey > client.pub
 ```
 
-Client config (import into WireGuard app):
+
+Write client config
+(Can be copy and import into WireGuard app):
 ```ini
 [Interface]
 PrivateKey = <contents of client.key>
 Address = 10.0.0.2/24
-DNS = 10.0.0.1
-
+DNS = 10.0.0.1 # tunnel ip for Rpi
 [Peer]
 PublicKey = <contents of server.pub>
 Endpoint = YOUR_SUBDOMAIN.duckdns.org:51820
+# For anyone using ISP Local DDNS, please use their domain name instead.
+  # For my case:
+  # Endpoint = YOUR_SUBDOMAIN.thddns.net:5540
 AllowedIPs = 10.0.0.0/24, 192.168.1.0/24
 PersistentKeepalive = 25
 ```
@@ -202,18 +184,19 @@ Install dnsmasq:
 ```bash
 sudo apt install dnsmasq -y
 /etc/dnsmasq.conf:
-confinterface=eth0
-interface=wg0
+
 ```
 fill static DNS entries
-```conf
+```bash
+interface=eth0
+interface=wg0
 # Example
 address=/mypc.home/192.168.1.120
 address=/laptop.home/192.168.1.110
 address=/esp32.home/192.168.1.115
 address=/rpi.home/192.168.1.253
 
-Forward everything else to upstream DNS
+# Forward everything else to upstream DNS
 server=1.1.1.1		# Cloudflare DNS
 server=8.8.8.8		# Google DNS
 ```
@@ -233,40 +216,18 @@ sudo wg show
 
 ---
 
+There is it adding more client.
 ## Adding More Clients
 
 Repeat step 5 for each device (phone, laptop, etc.). Each gets a unique keypair and a unique VPN IP (`10.0.0.x`).
 
----
 
-## Checklist for you
+## Done, to use the VPN
 
-- [ ] Set static IP for your Single Board Computer
-  - If use RasberyPi OS, the hostname can be set from its OS installation. Can SSH to its host name. 
-  - Other OS might need to set static IP via `dhcpcd.conf`
-- [ ] Create DNS server with RasberryPi(RPi), DuckDNS subdomain created + update script running
-- [ ] Router port `51820/UDP` forwarded to RPi
-- [ ] WireGuard installed and `wg0` service running
-- [ ] dnsmasq installed and configured
-- [ ] Router DHCP disabled
-- [ ] Client config imported into WireGuard app
-- [ ] `ssh hostname.home` works over VPN tunnel
+- Open wireguard app
+- Connect WireGuard profile → inside home LAN
+- `ssh user@mypc.home` works
 
----
-
-## Troubleshooting
-
-| Problem | Check |
-|---------|-------|
-| Can't connect to VPN | DuckDNS updated? Port 51820 forwarded? `sudo wg show` on RPi |
-| `.home` names not resolving | Is dnsmasq running? Is DNS in client config set to `10.0.0.1`? |
-| DHCP not working | Only one DHCP server active? Router's DHCP disabled? |
-| RPi IP changed | Static IP set in `dhcpcd.conf`? |
-
----
-
-## Security Notes
-
-- WireGuard only responds to valid authenticated peers — unrecognized traffic is silently dropped
-- Keep your private keys off version control — never commit `/etc/wireguard/*.key`
-- Consider rotating client keys periodically if a device is lost
+#### In case the client have no GUI
+- [Install Wireguard in Terminal & Quickstart](https://www.wireguard.com/quickstart/#key-generation)
+- Write a client config file by yourself, here's the standard way to write it: [Samples client.conf](https://gist.github.com/lanceliao/5d2977f417f34dda0e3d63ac7e217fd6)
