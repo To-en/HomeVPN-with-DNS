@@ -3,11 +3,10 @@
 > How I setup my own VPN Server to access home network.<br>
 > The original need is for me to SSH from my university.
 
-Instead of using Tailscale I decided to built on a **Raspberry Pi 4 (Rpi)** <br>
-as WireGuard server & DNS server.<br> 
+Built on a **Raspberry Pi 4 (Rpi)** as WireGuard server & DNS server.<br> 
 Once connected, just `ssh user@mypc.home` from anywhere.
 
----
+***--- This guide are for Linux machine ---***
 
 ## How I set it up
 
@@ -22,7 +21,7 @@ Once connected, just `ssh user@mypc.home` from anywhere.
 		- DHCP (192.168.1.100 – 200)
         │
 	[Home LAN]
-   - Other devices
+   - Other devices (Should be DHCP reserved)
    - RasberryPi (Static IP  192.168.1.253) 
       - WireGuard server  (10.0.0.1) 
       - DNS server        (*Static Mapping)
@@ -48,16 +47,14 @@ To bypass CGNAT:
               │
       [Router: port forward 5540]
     ```
-
+---
 ## Setup Guide
 
 ### 1. Set RPi Static IP
 I set it as 192.168.253/24, you set what is needed for
 ```bash
 sudo nmcli con mod "Wired connection 1" ipv4.address 192.168.1.253/24
-
 sudo nmcli con mode "Wired connection 1" ipv4.gateway 192.168.1.1
-
 sudo nmcli con mode "Wired connection 1" ipv4.dns 127.0.0.1
 # Pi itself act as DNS so we fill loopback ip
 
@@ -76,6 +73,7 @@ crontab -e
 # Add to cron — runs every 5 minutes
 */5 * * * * curl -s "https://www.duckdns.org/update?domains=YOUR_SUBDOMAIN&token=YOUR_TOKEN&ip=" > ~/duckdns.log
 ```
+For CGNAT Router, do according to [the previous section](#for-someone-with-cgnat-router)
 
 ---
 
@@ -115,9 +113,21 @@ wg genkey | sudo tee /etc/wireguard/server_private.key | wg pubkey | sudo tee /e
 
 # Create config file of this name
 sudo nano /etc/wireguard/wg0.conf
+# ---- Edit the file
+```
+```bash
+# ---- After edit, restart the interface
+sudo wg-quick down wg0 && sudo wg-quick up wg0
+
+# Make wireguard service run at start up
+sudo systemctl enable wg-quick@wg0
+sudo systemctl start wg-quick@wg0
+# Enable IP forwarding
+echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
 ```
 
-Write the following in `wg0.conf`
+What to write in `/etc/wireguard/wg0.conf`
 ```ini
 [Interface]
 PrivateKey = <contents of server.key>
@@ -125,34 +135,31 @@ Address = 10.0.0.1/24
 ListenPort = 51820
 PostUp   = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
 PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
-[Peer]
+
 # Add one block per client — see step 6
+[Peer]
+# Client 1
 PublicKey = <client_public_key>
 AllowedIPs = 10.0.0.2/32
-```
-Automate wireguard process 
-```bash
-# Start wireguard as systemd service
-sudo systemctl enable wg-quick@wg0
-sudo systemctl start wg-quick@wg0
 
-# Enable IP forwarding
-echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
+[Peer]
+#Client 2
+PublicKey = <client_public_key>
+AllowedIPs = 10.0.0.3/32
+#...
 ```
-
 ---
-
 ### 5. WireGuard -- Client
 
-Generate keypair for each client device:
+Use any machine , Window , Mac, Linux all have same CLI, Find some safe directory and run:
 ```bash
-wg genkey | tee client.key | wg pubkey > client.pub
+# Generate keypair for client device
+wg genkey | tee client.key | wg pubkey > client.pub;
+# create config file
+touch wg0.conf
 ```
 
-
-Write client config
-(Can be copy and import into WireGuard app):
+What to  wg0.conf as following:
 ```ini
 [Interface]
 PrivateKey = <contents of client.key>
@@ -161,33 +168,37 @@ DNS = 10.0.0.1 # tunnel ip for Rpi
 [Peer]
 PublicKey = <contents of server.pub>
 Endpoint = YOUR_SUBDOMAIN.duckdns.org:51820
-# For anyone using ISP Local DDNS, please use their domain name instead.
+# For anyone who has CGNAT problem use ISP Local DDNS provided domain name instead.
   # For my case:
   # Endpoint = YOUR_SUBDOMAIN.thddns.net:5540
 AllowedIPs = 10.0.0.0/24, 192.168.1.0/24
 PersistentKeepalive = 25
 ```
+- A samples of client side config file [here](https://gist.github.com/lanceliao/5d2977f417f34dda0e3d63ac7e217fd6)
 
+```bash
+sudo wg-quick down wg0 && sudo wg-quick up wg0
+```
 Add the client's public key as a `[Peer]` block in `wg0.conf`, then reload:
-```bash
-sudo wg-quick down wg0 && sudo wg-quick up wg0
-```
 
-This outputs a `client.conf` ready to import into the WireGuard app. Add the generated `[Peer]` block to `/etc/wireguard/wg0.conf` on the RPi, then reload:
+Add the generated `[Peer]` block to `/etc/wireguard/wg0.conf` on the RPi, then reload:
 
-```bash
-sudo wg-quick down wg0 && sudo wg-quick up wg0
-```
-### 6. Make Rpi a DNS
+### Repeat step 5 for each Client
 
-Install dnsmasq:
+Each machine will have uniquekey pair, and remember, do not forget to import the wg0.conf into the WireGuard app on client machine.
+
+
+
+### 6. Make Rpi a local DNS
+
+Install dnsmasq and edit its config file:
 ```bash
 sudo apt install dnsmasq -y
-/etc/dnsmasq.conf:
-
+sudo nano /etc/dnsmasq.conf
 ```
 fill static DNS entries
 ```bash
+# --- Append to new line in the config file
 interface=eth0
 interface=wg0
 # Example
@@ -216,18 +227,18 @@ sudo wg show
 
 ---
 
-There is it adding more client.
-## Adding More Clients
-
-Repeat step 5 for each device (phone, laptop, etc.). Each gets a unique keypair and a unique VPN IP (`10.0.0.x`).
-
-
 ## Done, to use the VPN
 
 - Open wireguard app
 - Connect WireGuard profile → inside home LAN
 - `ssh user@mypc.home` works
 
-#### In case the client have no GUI
-- [Install Wireguard in Terminal & Quickstart](https://www.wireguard.com/quickstart/#key-generation)
-- Write a client config file by yourself, here's the standard way to write it: [Samples client.conf](https://gist.github.com/lanceliao/5d2977f417f34dda0e3d63ac7e217fd6)
+#### In case the client use terminal command
+Run
+```bash
+# For bring VPN interface up
+sudo wg-quick up wg0 
+
+# To bring VPN interface down
+sudo wg-quick down wg0
+```
